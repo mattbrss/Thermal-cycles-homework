@@ -58,23 +58,19 @@ class gas_turbine(object):
         self.x=self.alkane[0]; self.y=self.alkane[1]
         self.x_N2_0 = self.air_prop[self.air.index('N2')] # [-] molar fraction of N2 in the inlet air
         self.x_O2_0 = self.air_prop[self.air.index('O2')] # [-] molar fraction of O2 in the inlet air
-        # Create the string for the air mixture to be used in CoolProp
-        self.air_string = self.create_gas_string(self.air,self.air_prop)
+
         # Compute the molar mass of the fuel and the air
         M_m_O = CP.PropsSI('MOLARMASS','O2')/2 # [kg/mol] molar mass of Oxygen
         M_m_C = CP.PropsSI('MOLARMASS','CO2')-(2*M_m_O) # [kg/mol] molar mass of Carbon
         M_m_H = CP.PropsSI('MOLARMASS','H2')/2 # [kg/mol] molar mass of Hydrogen
-        M_m_air = CP.PropsSI('MOLARMASS',self.air_string) # [kg/mol] molar mass of air
+        M_m_air = CP.PropsSI('MOLARMASS','N2')*self.x_N2_0 + CP.PropsSI('MOLARMASS','O2')*self.x_O2_0 # [kg/mol] molar mass of air
         M_m_f   = self.x*M_m_C + self.y*M_m_H # masse d'une mole de combustible (kg/mol)
         n_a1  = (self.x + self.y/4)/self.x_O2_0    # mol d'air / mol de combustible
         self.ma1 = n_a1*M_m_air / M_m_f         # kg air / kg combustible
 
         
-        # Processing enthalpy,entropy and exergy of air at reference conditions
-        
+        # Set the reference state for the enthalpy and entropy calculations
         self.T_0, self.p_0 = 288.15, 1e5
-        self.h_0_air = CP.PropsSI('H','P',self.p_0,'T',self.T_0,self.air_string) # [J/kg] enthalpy at state 0
-        self.s_0_air = CP.PropsSI('S','P',self.p_0,'T',self.T_0,self.air_string) # [J/kg/K] entropy at state 0
         for f in ['N2','O2','CO2']:
             CP.set_reference_state(f, self.T_0, CP.PropsSI('Dmolar','T',self.T_0,'P',self.p_0,f), 0, 0)
         CP.set_reference_state('Water', self.T_0, CP.PropsSI('Dmolar','T',self.T_0,'Q',1,'Water'), 0, 0)
@@ -84,20 +80,10 @@ class gas_turbine(object):
         self.e_f = 52215*1e3 # [J/kg] exergy of the fuel
         # h_f
         self.h_f = (CP.PropsSI('H','P',self.p_0,'T',self.T_1,'Methane')  - CP.PropsSI('H','P',self.p_0,'T',self.T_0,'Methane'))   # specific enthalpy (we suppose that fuel is injected at T_1, ambiant temperature) [J/kg]
-        # Set the number of points for the numerical integrations
+        # Set the number of points for the numerical integrations and the display option
         self.integration_points = 20
         self.display            = display                   # if True, make the plots
 
-    def create_gas_string(self,gas_species,gas_prop):
-        """
-        Create a string for the gas mixture to be used in CoolProp
-        """
-        gas_string = 'SRK::'
-        for i in range(len(gas_species)):
-            gas_string += gas_species[i] + '[' + str(gas_prop[i]) + ']'
-            if i < len(gas_species)-1:
-                gas_string += '&'
-        return gas_string
     def n_tot(self,excess_air):
         """
         Compute the total number of moles in the combustion products
@@ -129,6 +115,35 @@ class gas_turbine(object):
         """
         x_CO2 = self.x/self.n_tot(excess_air) # [-] molar fraction of CO2 in the combustion products
         return x_CO2
+    def gamma_air(self, p, T):
+        x = {'O2':self.x_O2_0,'N2':self.x_N2_0}
+        M_mix = sum(x[k]*CP.PropsSI('MOLARMASS',k) for k in x)
+        Cp = sum(x[k]*CP.PropsSI('CPMOLAR','P',p,'T',T,k) for k in x)/M_mix
+        Cv = sum(x[k]*CP.PropsSI('CVMOLAR','P',p,'T',T,k) for k in x)/M_mix
+        return Cp/Cv
+    def gamma_gas(self, p, T, lam):
+        """
+        Compute the specific heat ratio of the combustion products
+        """
+        x = {'O2':self.x_O2(lam),'N2':self.x_N2(lam),'H2O':self.x_H2O(lam),'CO2':self.x_CO2(lam)}
+        M_mix = sum(x[k]*CP.PropsSI('MOLARMASS',k) for k in x)
+        Cp = sum(x[k]*CP.PropsSI('CPMOLAR','P',p,'T',T,k) for k in x)/M_mix
+        Cv = sum(x[k]*CP.PropsSI('CVMOLAR','P',p,'T',T,k) for k in x)/M_mix
+        return Cp/Cv
+    def h_air(self, p, T):
+        """
+        Compute the specific enthalpy of the air
+        """
+        x = {'O2':self.x_O2_0,'N2':self.x_N2_0}
+        M_mix = sum(x[k]*CP.PropsSI('MOLARMASS',k) for k in x)
+        return sum(x[k]*CP.PropsSI('Hmolar','P',p,'T',T,k) for k in x)/M_mix   # [J/kg]
+    def s_air(self, p, T):
+        """
+        Compute the specific entropy of the air
+        """
+        x = {'O2':self.x_O2_0,'N2':self.x_N2_0}
+        M_mix = sum(x[k]*CP.PropsSI('MOLARMASS',k) for k in x)
+        return sum(x[k]*CP.PropsSI('Smolar','P',p,'T',T,k) for k in x)/M_mix   # [J/kg/K]
     def h_gas(self, p, T, lam):
         """
         Compute the specific enthalpy of the combustion products
@@ -136,7 +151,13 @@ class gas_turbine(object):
         x = {'O2':self.x_O2(lam),'N2':self.x_N2(lam),'H2O':self.x_H2O(lam),'CO2':self.x_CO2(lam)}
         M_mix = sum(x[k]*CP.PropsSI('MOLARMASS',k) for k in x)
         return sum(x[k]*CP.PropsSI('Hmolar','P',p,'T',T,k) for k in x)/M_mix   # [J/kg]
-    
+    def s_gas(self, p, T, lam):
+        """
+        Compute the specific entropy of the combustion products
+        """
+        x = {'O2':self.x_O2(lam),'N2':self.x_N2(lam),'H2O':self.x_H2O(lam),'CO2':self.x_CO2(lam)}
+        M_mix = sum(x[k]*CP.PropsSI('MOLARMASS',k) for k in x)
+        return sum(x[k]*CP.PropsSI('Smolar','P',p,'T',T,k) for k in x)/M_mix   # [J/kg/K] 
     def _poly_path(self, p_a, T_a, p_b, T_b, N):
         """Chemin polytropique T = T_a (p/p_a)^n passant par (p_a,T_a) et (p_b,T_b)"""
         n = np.log(T_b/T_a)/np.log(p_b/p_a)
@@ -145,29 +166,29 @@ class gas_turbine(object):
 
     def make_figures(self, N=60):
         lam = self.excess_air
-        ev = lambda f, p, T: np.array([f(a, b) for a, b in zip(p, T)])
-        s_air = lambda p, T: CP.PropsSI('S','P',p,'T',T,self.air_string) - self.s_0_air
-        h_air = lambda p, T: CP.PropsSI('H','P',p,'T',T,self.air_string) - self.h_0_air
-        s_gas = lambda p, T: CP.PropsSI('S','P',p,'T',T,self.gas_string) - self.s_0_gas
-        h_gas = lambda p, T: self.h_gas(p, T, lam)
+        ev  = lambda f, p, T: np.array([f(a, b) for a, b in zip(p, T)])
+        s_a = lambda p, T: self.s_air(p, T)
+        h_a = lambda p, T: self.h_air(p, T)
+        s_g = lambda p, T: self.s_gas(p, T, lam)
+        h_g = lambda p, T: self.h_gas(p, T, lam)
         w = np.linspace(0, 1, N)
 
         # 1-2 compression (air)
         p12, T12 = self._poly_path(self.p_1, self.T_1, self.p_2, self.T_2, N)
-        s12, h12 = ev(s_air, p12, T12), ev(h_air, p12, T12)
+        s12, h12 = ev(s_a, p12, T12), ev(h_a, p12, T12)
         # 2-3 combustion (air -> fumées)
         p23 = self.p_2 + w*(self.p_3 - self.p_2)
         T23 = self.T_2 + w*(self.T_3 - self.T_2)
-        s23 = (1-w)*ev(s_air, p23, T23) + w*ev(s_gas, p23, T23)
-        h23 = (1-w)*ev(h_air, p23, T23) + w*ev(h_gas, p23, T23)
+        s23 = (1-w)*ev(s_a, p23, T23) + w*ev(s_g, p23, T23)
+        h23 = (1-w)*ev(h_a, p23, T23) + w*ev(h_g, p23, T23)
         # 3-4 détente (fumées)
         p34, T34 = self._poly_path(self.p_3, self.T_3, self.p_4, self.T_4, N)
-        s34, h34 = ev(s_gas, p34, T34), ev(h_gas, p34, T34)
+        s34, h34 = ev(s_g, p34, T34), ev(h_g, p34, T34)
         # 4-1 échappement fictif (fumées -> air), isobare
         p41 = np.full(N, self.p_1)
         T41 = self.T_4 + w*(self.T_1 - self.T_4)
-        s41 = (1-w)*ev(s_gas, p41, T41) + w*ev(s_air, p41, T41)
-        h41 = (1-w)*ev(h_gas, p41, T41) + w*ev(h_air, p41, T41)
+        s41 = (1-w)*ev(s_g, p41, T41) + w*ev(s_a, p41, T41)
+        h41 = (1-w)*ev(h_g, p41, T41) + w*ev(h_a, p41, T41)
 
         # --- T-s ---
         fig_Ts, ax = plt.subplots()
@@ -213,75 +234,62 @@ class gas_turbine(object):
         # self.h_0_air = CP.PropsSI('H','P',self.p_0_air,'T',self.T_0,self.air_string) # [J/kg] enthalpy at state 0
         # self.s_0_air = CP.PropsSI('S','P',self.p_0_air,'T',self.T_0,self.air_string) # [J/kg/K] entropy at state 0
         # State 1 -------------------------------------------------------------
-        self.h_1 = CP.PropsSI('H','P',self.p_1,'T',self.T_1,self.air_string) - self.h_0_air  # [J/kg] enthalpy at state 1
-        self.s_1 = CP.PropsSI('S','P',self.p_1,'T',self.T_1,self.air_string) - self.s_0_air  # [J/kg/K] entropy at state 1
+        self.h_1 = self.h_air(self.p_1, self.T_1)  # [J/kg] enthalpy at state 1
+        self.s_1 = self.s_air(self.p_1, self.T_1)  # [J/kg/K] entropy at state 1
         self.e_1 = (self.h_1) - self.T_0*(self.s_1) # [J/kg] exergy at state 1
         # State 2 -------------------------------------------------------------
         self.p_2 = self.r_c*self.p_1
-        gamma_c_in = CP.PropsSI('CPMASS','P',self.p_1,'T',self.T_1,self.air_string)/CP.PropsSI('CVMASS','P',self.p_1,'T',self.T_1,self.air_string)
+        gamma_c_in = self.gamma_air(self.p_1, self.T_1) # [-] specific heat ratio of the air at state 1 (used for the first guess of T2)
             # Fixed point iteration to find T2
         self.T_2 = self.T_1*(self.p_2/self.p_1)**((gamma_c_in-1)/(gamma_c_in*self.eta_pi_c)) # First guess for T2
         nb_iter = 0
         while True:
             previous_T_2 = self.T_2
             T_vals = np.linspace(self.T_1,self.T_2,self.integration_points)
-            gamma_c_moy = simpson(CP.PropsSI('CPMASS','P',self.p_1,'T',T_vals,self.air_string)/CP.PropsSI('CVMASS','P',self.p_1,'T',T_vals,self.air_string), x=T_vals)/(self.T_2-self.T_1)
+            gamma_c_moy = simpson(self.gamma_air(self.p_1, T_vals), x=T_vals)/(self.T_2-self.T_1)
             self.T_2 = self.T_1*(self.p_2/self.p_1)**((gamma_c_moy-1)/(gamma_c_moy*self.eta_pi_c))
             nb_iter += 1
             if abs(self.T_2 - previous_T_2) < 1e-6 or nb_iter > 10:
-                if(nb_iter > 10):
-                    print("Warning: Fixed point iteration for T2 did not converge after 10 iterations.")
                 break
             # ------------------------------------
-        self.h_2 = CP.PropsSI('H','P',self.p_2,'T',self.T_2,self.air_string) - self.h_0_air # [J/kg] enthalpy at state 2
-        self.s_2 = CP.PropsSI('S','P',self.p_2,'T',self.T_2,self.air_string) - self.s_0_air # [J/(kg.K)] entropy at state 2
+        self.h_2 = self.h_air(self.p_2, self.T_2) # [J/kg] enthalpy at state 2
+        self.s_2 = self.s_air(self.p_2, self.T_2) # [J/(kg.K)] entropy at state 2
         self.e_2 = (self.h_2) - self.T_0*(self.s_2) # [J/kg] exergy at state 2
         # State 3 -------------------------------------------------------------
         self.p_3 = self.p_2*self.k_cc
             # Fixed point iteration to find h3
         self.lamda = 1 # First guess for lambda
         self.excess_air = 1 # First guess for excess air
-        self.gas = ['O2','N2','H2O','CO2']
-        self.gas_prop = [self.x_O2(self.lamda),self.x_N2(self.lamda),self.x_H2O(self.lamda),self.x_CO2(self.lamda)]
-        self.gas_string = self.create_gas_string(self.gas,self.gas_prop)
         self.h_3 = self.h_gas(self.p_3, self.T_3, self.excess_air) # First guess for h3
         nb_iter = 0
         while True:
             previous_h_3 = self.h_3
             self.excess_air = (self.LHV+self.h_f-self.h_3)/(self.ma1*(self.h_3-self.h_2)) # [-] excess air ratio
-            self.gas_prop = [self.x_O2(self.excess_air),self.x_N2(self.excess_air),self.x_H2O(self.excess_air),self.x_CO2(self.excess_air)]
-            self.gas_string = self.create_gas_string(self.gas,self.gas_prop)
             self.h_3 = self.h_gas(self.p_3, self.T_3, self.excess_air) # [J/kg] enthalpy at state 3
             nb_iter += 1
             if abs(self.h_3 - previous_h_3) < 1e-6 or nb_iter > 100:
-                if(nb_iter > 100):
-                    print("Warning: Fixed point iteration for h3 did not converge after 10 iterations.")
                 break
-            # new gas composition
-        self.gas_prop = [self.x_O2(self.excess_air),self.x_N2(self.excess_air),self.x_H2O(self.excess_air),self.x_CO2(self.excess_air)]
-        self.gas_string = self.create_gas_string(self.gas,self.gas_prop)
+        self.gas      = ['O2','N2','H2O','CO2']
+        self.gas_prop = [self.x_O2(self.excess_air), self.x_N2(self.excess_air),
+                         self.x_H2O(self.excess_air), self.x_CO2(self.excess_air)]
         # Processing enthalpy,entropy and exergy of air at reference conditions
-        self.s_0_gas = CP.PropsSI('S','P',self.p_0,'T',self.T_0,self.gas_string) # [J/kg/K] entropy at state 0
-
-        self.s_3 = CP.PropsSI('S','P',self.p_3,'T',self.T_3,self.gas_string) - self.s_0_gas # [J/kg/K] entropy at state 3
+        self.s_3 = self.s_gas(self.p_3, self.T_3, self.excess_air) # [J/kg/K] entropy at state 3
         self.e_3 = (self.h_3) - self.T_0*(self.s_3) # [J/kg] exergy at state 3
         # State 4 -------------------------------------------------------------
         self.p_4 = self.p_1
-        gamma_t_in = CP.PropsSI('CPMASS','P',self.p_3,'T',self.T_3,self.gas_string)/CP.PropsSI('CVMASS','P',self.p_3,'T',self.T_3,self.gas_string) 
+        gamma_t_in = self.gamma_gas(self.p_3, self.T_3, self.excess_air) # [-] specific heat ratio of the combustion products at state 3 (used for the first guess of T4)
         self.T_4 = self.T_3*(self.p_4/self.p_3)**(((gamma_t_in-1)*self.eta_pi_t)/(gamma_t_in))
         nb_iter = 0
         while True:
             previous_T_4 = self.T_4
             T_vals = np.linspace(self.T_3,self.T_4,self.integration_points)
-            gamma_t_moy = simpson(CP.PropsSI('CPMASS','P',self.p_3,'T',T_vals,self.gas_string)/CP.PropsSI('CVMASS','P',self.p_3,'T',T_vals,self.gas_string), x=T_vals)/(self.T_4-self.T_3)
+            gamma_t_moy = simpson(self.gamma_gas(self.p_3, T_vals, self.excess_air), x=T_vals)/(self.T_4-self.T_3)
             self.T_4 = self.T_3*(self.p_4/self.p_3)**(((gamma_t_moy-1)*self.eta_pi_t)/(gamma_t_moy))
             nb_iter += 1
             if abs(self.T_4 - previous_T_4) < 1e-6 or nb_iter > 10:
-                if(nb_iter > 10):
-                    print("Warning: Fixed point iteration for T4 did not converge after 10 iterations.")
                 break
         self.h_4 = self.h_gas(self.p_4, self.T_4, self.excess_air)    # [J/kg] enthalpy at state 4
-        self.s_4 = CP.PropsSI('S','P',self.p_4,'T',self.T_4,self.gas_string) - self.s_0_gas    # [J/kg/K] entropy at state 4
+        self.s_4 = self.s_gas(self.p_4, self.T_4, self.excess_air)    # [J/kg/K] entropy at state 4
         self.e_4 = (self.h_4) - self.T_0*(self.s_4)    # [J/kg] exergy at state 4
 
         # States --------------------------------------------------------------
