@@ -34,4 +34,5 @@ params =  {'T_3':       T_3,
 my_GT = gas_turbine(inputs,params,True)
 my_GT.evaluate()
 
+print("total gas prop: (should be 1.0)",sum(my_GT.gas_prop))
 eta_en = my_GT.eta_toten
