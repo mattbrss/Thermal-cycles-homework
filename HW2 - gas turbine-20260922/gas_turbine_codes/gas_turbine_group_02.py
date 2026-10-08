@@ -36,6 +36,26 @@ class gas_turbine(object):
     'evaluate':
         -> Compute the cycle
     """
+
+    # Fuel properties for different fuels obtained from the book "Thermal power plants: Energetic and exergetic approaches" by D.Johnson, J.Martin and P.Wauters
+    FUELS = {'Methane': {
+        'alkane': [1, 4],
+        'LHV': 50150*1e3,       # J/kg
+        'HHV': 55695*1e3,       # J/kg
+        'e_f': 52215*1e3,       # J/kg
+    },
+    'Propane': {
+        'alkane': [3, 8],
+        'LHV': 46465*1e3,       # J/kg
+        'HHV': 50495*1e3,       # J/kg
+        'e_f': 49045*1e3,       # J/kg
+    },
+    'Dihydrogen': {
+        'alkane': [0, 2],
+        'LHV': 120900*1e3,      # J/kg
+        'HHV': 142540*1e3,      # J/kg
+        'e_f': 118790*1e3,      # J/kg
+    }}
     
     def __init__(self,inputs,parameters,display):
         """
@@ -74,7 +94,7 @@ class gas_turbine(object):
         for f in ['N2','O2','CO2']:
             CP.set_reference_state(f, self.T_0, CP.PropsSI('Dmolar','T',self.T_0,'P',self.p_0,f), 0, 0)
         CP.set_reference_state('Water', self.T_0, CP.PropsSI('Dmolar','T',self.T_0,'Q',1,'Water'), 0, 0)
-        # LHV, HHV and e_c
+        # LHV, HHV and e_f
         self.LHV = 50150*1e3 # [J/kg] Lower heating value of the fuel (methane) from book at 0°C
         self.HHV = 55695*1e3 # [J/kg] Higher heating value of the fuel (methane) from book at 0°C
         self.e_f = 52215*1e3 # [J/kg] exergy of the fuel
@@ -144,20 +164,30 @@ class gas_turbine(object):
         x = {'O2':self.x_O2_0,'N2':self.x_N2_0}
         M_mix = sum(x[k]*CP.PropsSI('MOLARMASS',k) for k in x)
         return sum(x[k]*CP.PropsSI('Smolar','P',p,'T',T,k) for k in x)/M_mix   # [J/kg/K]
+    def Hm(self, k, p, T):
+        """[J/mol] enthalpie molaire, l'eau est forcée en vapeur sous sa T de saturation"""
+        if k == 'H2O' and T < CP.PropsSI('T','P',p,'Q',1,'Water'):
+            return CP.PropsSI('Hmolar','P',1.0,'T',T,'Water')      
+        return CP.PropsSI('Hmolar','P',p,'T',T,k)
+    def Sm(self, k, p, T):
+        """[J/mol/K] entropie molaire, même convention"""
+        if k == 'H2O' and T < CP.PropsSI('T','P',p,'Q',1,'Water'):
+            return CP.PropsSI('Smolar','P',1.0,'T',T,'Water') - 8.314462618*np.log(p/1.0)
+        return CP.PropsSI('Smolar','P',p,'T',T,k)
     def h_gas(self, p, T, lam):
         """
         Compute the specific enthalpy of the combustion products
         """
         x = {'O2':self.x_O2(lam),'N2':self.x_N2(lam),'H2O':self.x_H2O(lam),'CO2':self.x_CO2(lam)}
         M_mix = sum(x[k]*CP.PropsSI('MOLARMASS',k) for k in x)
-        return sum(x[k]*CP.PropsSI('Hmolar','P',p,'T',T,k) for k in x)/M_mix   # [J/kg]
+        return sum(x[k]*self.Hm(k, p, T) for k in x)/M_mix   # [J/kg]
     def s_gas(self, p, T, lam):
         """
         Compute the specific entropy of the combustion products
         """
         x = {'O2':self.x_O2(lam),'N2':self.x_N2(lam),'H2O':self.x_H2O(lam),'CO2':self.x_CO2(lam)}
         M_mix = sum(x[k]*CP.PropsSI('MOLARMASS',k) for k in x)
-        return sum(x[k]*CP.PropsSI('Smolar','P',p,'T',T,k) for k in x)/M_mix   # [J/kg/K] 
+        return sum(x[k]*self.Sm(k, p, T) for k in x)/M_mix   # [J/kg/K] 
     def _poly_path(self, p_a, T_a, p_b, T_b, N):
         """Chemin polytropique T = T_a (p/p_a)^n passant par (p_a,T_a) et (p_b,T_b)"""
         n = np.log(T_b/T_a)/np.log(p_b/p_a)
@@ -210,18 +240,20 @@ class gas_turbine(object):
         ax.set_xlabel('h [kJ/kg]'); ax.set_ylabel('p [bar]'); ax.set_title('p-h diagram'); ax.grid(True, which='both')
 
         # --- camembert énergie ---
+        P_prim_en = self.dotm_f*(self.LHV + self.h_f)     # [W] flux d'énergie primaire
         loss_en = [self.P_e, self.loss_mec, self.loss_echen]
         names_en = ['Net power', 'Mechanical losses', 'Exhaust losses']
         fig_pie_en, ax = plt.subplots()
         ax.pie(loss_en, labels=[f'{n}\n{v/1e6:.1f} MW' for n, v in zip(names_en, loss_en)], autopct='%1.1f%%')
-        ax.set_title('Energy balance (fuel input = 100 %)')
+        ax.set_title(f'Primary energy flow {P_prim_en/1e6:.1f} MW')
 
         # --- camembert exergie ---
+        P_prim_ex = self.dotm_f*self.e_f                  # [W] flux d'exergie primaire
         loss_ex = [self.P_e, self.loss_mec, self.loss_rotex, self.loss_combex, self.loss_echex]
         names_ex = ['Net power', 'Mechanical losses', 'Rotor losses', 'Combustion losses', 'Exhaust losses']
         fig_pie_ex, ax = plt.subplots()
         ax.pie(loss_ex, labels=[f'{n}\n{v/1e6:.1f} MW' for n, v in zip(names_ex, loss_ex)], autopct='%1.1f%%')
-        ax.set_title('Exergy balance (fuel exergy = 100 %)')
+        ax.set_title(f'Primary exergy flow {P_prim_ex/1e6:.1f} MW')
 
         return fig_pie_en, fig_pie_ex, fig_Ts, fig_ph
     def evaluate(self):
@@ -230,9 +262,6 @@ class gas_turbine(object):
         It evaluates the different thermodynamic quantities at each state of 
         the cycle, as well as some KPI's.
         """
-        # # State 0 (reference state) -------------------------------------------
-        # self.h_0_air = CP.PropsSI('H','P',self.p_0_air,'T',self.T_0,self.air_string) # [J/kg] enthalpy at state 0
-        # self.s_0_air = CP.PropsSI('S','P',self.p_0_air,'T',self.T_0,self.air_string) # [J/kg/K] entropy at state 0
         # State 1 -------------------------------------------------------------
         self.h_1 = self.h_air(self.p_1, self.T_1)  # [J/kg] enthalpy at state 1
         self.s_1 = self.s_air(self.p_1, self.T_1)  # [J/kg/K] entropy at state 1
@@ -272,9 +301,10 @@ class gas_turbine(object):
         self.gas      = ['O2','N2','H2O','CO2']
         self.gas_prop = [self.x_O2(self.excess_air), self.x_N2(self.excess_air),
                          self.x_H2O(self.excess_air), self.x_CO2(self.excess_air)]
-        # Processing enthalpy,entropy and exergy of air at reference conditions
         self.s_3 = self.s_gas(self.p_3, self.T_3, self.excess_air) # [J/kg/K] entropy at state 3
-        self.e_3 = (self.h_3) - self.T_0*(self.s_3) # [J/kg] exergy at state 3
+        s_0_gas = self.s_gas(self.p_0, self.T_0, self.excess_air) # [J/kg/K] entropy of the gas at reference conditions
+        h_0_gas = self.h_gas(self.p_0, self.T_0, self.excess_air) # [J/kg] enthalpy of the gas at reference conditions
+        self.e_3 = (self.h_3 - h_0_gas) - self.T_0*(self.s_3 - s_0_gas) # [J/kg] exergy at state 3
         # State 4 -------------------------------------------------------------
         self.p_4 = self.p_1
         gamma_t_in = self.gamma_gas(self.p_3, self.T_3, self.excess_air) # [-] specific heat ratio of the combustion products at state 3 (used for the first guess of T4)
@@ -290,7 +320,7 @@ class gas_turbine(object):
                 break
         self.h_4 = self.h_gas(self.p_4, self.T_4, self.excess_air)    # [J/kg] enthalpy at state 4
         self.s_4 = self.s_gas(self.p_4, self.T_4, self.excess_air)    # [J/kg/K] entropy at state 4
-        self.e_4 = (self.h_4) - self.T_0*(self.s_4)    # [J/kg] exergy at state 4
+        self.e_4 = (self.h_4 - h_0_gas) - self.T_0*(self.s_4 - s_0_gas)    # [J/kg] exergy at state 4
 
         # States --------------------------------------------------------------
         self.p           = self.p_1, self.p_2, self.p_3, self.p_4
@@ -316,8 +346,7 @@ class gas_turbine(object):
             # Energy efficiencies ---------------------------------------------------
         self.eta_cyclen  = P_mcy/(self.dotm_g*self.h_3 - (self.dotm_a*self.h_2))    # [-] cycle energy efficiency (Course 1 slides 6)
         self.eta_mec   = self.P_e/P_mcy                             # [-] mechanical efficiency (p.122)
-        eta_gen   = (self.dotm_g*self.h_3 - (self.dotm_a*self.h_2))/(self.dotm_f*self.LHV)  # [-] generator efficiency (Course 1 slides 6)
-        self.eta_toten   = eta_gen*self.eta_cyclen*self.eta_mec                   # [-] total energy efficiency (Course 1 slides 6 -> why in book p.123 eta_gen is not included in the total energy efficiency ?)
+        self.eta_toten   = self.eta_cyclen*self.eta_mec                   # [-] total energy efficiency
             # Exergy efficiencies ---------------------------------------------------
         self.eta_cyclex  = P_mcy/(self.dotm_g*self.e_3 - self.dotm_a*self.e_2)    # [-] cycle exergy efficiency (p.124)
         self.eta_totex   = self.P_e/(self.dotm_f*self.e_f)                          # [-] total exergy efficiency (p.124)
@@ -342,63 +371,3 @@ class gas_turbine(object):
             self.FIG = self.fig_pie_en,self.fig_pie_ex, self.fig_Ts, self.fig_ph
         else:
             self.FIG = None, None, None, None
-
-if __name__ == "__main__":
-    
-    p_1, T_1 = 1e+5, 288.15 # [Pa], [K]
-    r_c = 18
-    T_3 = 1673.15 # [K]
-    eta_pi = 0.9 # [-]
-    k_mec = 0.015 # [-]
-    k_cc = 0.95
-    P_e = 230e+6
-
-    inputs = p_1,T_1,P_e
-    params =  {'T_3':       T_3,
-               'r_c':       r_c,
-               'eta_pi_c':  eta_pi,
-               'eta_pi_t':  eta_pi,
-               'k_cc':      k_cc,
-               'k_mec':     k_mec,
-               'air':       ['N2','O2'],
-               'air_prop':  [0.79,0.21],
-               'alkane':    [1,4]
-               }
-    my_GT = gas_turbine(inputs,params,True)
-    my_GT.evaluate()
-    print(sum(my_GT.gas_prop))
-    print("Cycle data:")
-    print("Pressure:",my_GT.p)
-    print("Temperature:",my_GT.T)
-    print("Enthalpy:",my_GT.h)
-    print("Entropy:",my_GT.s)
-    print("Exergy:",my_GT.e)
-    print("Combustion data:")
-    print("LHV",my_GT.LHV)
-    print("Excess air",my_GT.excess_air)
-    print("Gas composition:",my_GT.gas,my_GT.gas_prop)
-    print("Mass flow data:")
-    print("Air mass flow rate",my_GT.dotm_a)
-    print("Fuel mass flow rate",my_GT.dotm_f)
-    print("Gas mass flow rate",my_GT.dotm_g)
-    print("Energy efficiencies:")
-    print("Cycle energy efficiency",my_GT.eta_cyclen)
-    print("Total energy efficiency",my_GT.eta_toten)
-    print("Mechanical efficiency",my_GT.eta_mec)
-    print("Exergy efficiencies:")
-    print("Cycle exergy efficiency",my_GT.eta_cyclex)
-    print("Total exergy efficiency",my_GT.eta_totex)
-    print("Rotor exergy efficiency",my_GT.eta_rotex)
-    print("Combustion exergy efficiency",my_GT.eta_combex)
-    print("Energy losses")
-    print("Mechanical losses",my_GT.loss_mec)
-    print("Exhaust energy losses",my_GT.loss_echen)
-    print("Exergy losses")
-    print("Mechanical losses",my_GT.loss_mec)
-    print("Rotor exergy losses",my_GT.loss_rotex)
-    print("Combustion exergy losses",my_GT.loss_combex)
-    print("Exhaust exergy losses",my_GT.loss_echex)
-    print("Cycle work",my_GT.WORK)
-
-    print("Exergy power",my_GT.dotm_a*my_GT.e_1,my_GT.dotm_a*my_GT.e_2,my_GT.dotm_g*my_GT.e_3,my_GT.dotm_g*my_GT.e_4)
-    plt.show()
