@@ -94,7 +94,7 @@ class Brayton_cycle(object):
         # Air ambiant ------------------------------------
         self.p_4 = self.p_1
         # Turbine ----------------------------------------
-        gamma_t_in = PropsSI('CPMASS','P',self.p_3,'T',self.T_3,self.fluid_string)/PropsSI('CVMASS','P',self.p_3,'T',self.T_3,self.fluid_string) # on suppose que le gamma de la turbine va rester constant et égal à celui de l'entrée de la turbine
+        gamma_t_in = PropsSI('CPMASS','P',self.p_3,'T',self.T_3,self.fluid_string)/PropsSI('CVMASS','P',self.p_3,'T',self.T_3,self.fluid_string) 
         self.T_4 = self.T_3*(self.p_4/self.p_3)**(((gamma_t_in-1)*self.eta_pi_t)/(gamma_t_in))
         nb_iter = 0
         while True:
