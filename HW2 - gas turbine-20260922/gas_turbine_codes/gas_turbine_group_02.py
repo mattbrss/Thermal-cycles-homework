@@ -2,8 +2,16 @@
 LELME2150 - Thermal cycles
 Homework 2 - Gas turbine
 
-Signature of the function for the gas turbine
+Group 02
 
+AI-assistance
+------------------------
+This code was written by the group. The following AI tools were used as support:
+  - Claude (Anthropic), in a chat conversation: to discuss the equations,
+    to draft some parts of the code and to help debug.
+  - GitHub Copilot (VS Code): inline auto-completion suggestions while typing, docstring generation.
+All AI-generated suggestions were reviewed, adapted and tested by the group. The results
+were checked against book results (p. 125) of the assignment and the exergy pie chart of the course.
 """
 
 #
@@ -50,7 +58,7 @@ class gas_turbine(object):
         'HHV': 50495*1e3,       # J/kg
         'e_f': 49045*1e3,       # J/kg
     },
-    'Dihydrogen': {
+    'Hydrogen': {
         'alkane': [0, 2],
         'LHV': 120900*1e3,      # J/kg
         'HHV': 142540*1e3,      # J/kg
@@ -80,6 +88,7 @@ class gas_turbine(object):
         self.x_O2_0 = self.air_prop[self.air.index('O2')] # [-] molar fraction of O2 in the inlet air
 
         # Compute the molar mass of the fuel and the air
+        self.R = CP.PropsSI('GAS_CONSTANT','O2') # gas constant
         M_m_O = CP.PropsSI('MOLARMASS','O2')/2 # [kg/mol] molar mass of Oxygen
         M_m_C = CP.PropsSI('MOLARMASS','CO2')-(2*M_m_O) # [kg/mol] molar mass of Carbon
         M_m_H = CP.PropsSI('MOLARMASS','H2')/2 # [kg/mol] molar mass of Hydrogen
@@ -95,11 +104,18 @@ class gas_turbine(object):
             CP.set_reference_state(f, self.T_0, CP.PropsSI('Dmolar','T',self.T_0,'P',self.p_0,f), 0, 0)
         CP.set_reference_state('Water', self.T_0, CP.PropsSI('Dmolar','T',self.T_0,'Q',1,'Water'), 0, 0)
         # LHV, HHV and e_f
-        self.LHV = 50150*1e3 # [J/kg] Lower heating value of the fuel (methane) from book at 0°C
-        self.HHV = 55695*1e3 # [J/kg] Higher heating value of the fuel (methane) from book at 0°C
-        self.e_f = 52215*1e3 # [J/kg] exergy of the fuel
+        matches = [name for name, props in self.FUELS.items() if props['alkane'] == self.alkane]
+
+        if len(matches) != 1:
+            raise ValueError(
+                f"Combustible non reconnu ou ambigu : {self.alkane}"
+            )
+        self.fuel = matches[0]
+        self.LHV = gas_turbine.FUELS[self.fuel]['LHV'] # [J/kg] Lower heating value of the fuel
+        self.HHV = gas_turbine.FUELS[self.fuel]['HHV'] # [J/kg] Higher heating value of the fuel
+        self.e_f = gas_turbine.FUELS[self.fuel]['e_f'] # [J/kg] exergy of the fuel
         # h_f
-        self.h_f = (CP.PropsSI('H','P',self.p_0,'T',self.T_1,'Methane')  - CP.PropsSI('H','P',self.p_0,'T',self.T_0,'Methane'))   # specific enthalpy (we suppose that fuel is injected at T_1, ambiant temperature) [J/kg]
+        self.h_f = (CP.PropsSI('H','P',self.p_0,'T',self.T_1,self.fuel)  - CP.PropsSI('H','P',self.p_0,'T',self.T_0,self.fuel))   # specific enthalpy (we suppose that fuel is injected at T_1, ambiant temperature) [J/kg]
         # Set the number of points for the numerical integrations and the display option
         self.integration_points = 20
         self.display            = display                   # if True, make the plots
@@ -172,7 +188,7 @@ class gas_turbine(object):
     def Sm(self, k, p, T):
         """[J/mol/K] entropie molaire, même convention"""
         if k == 'H2O' and T < CP.PropsSI('T','P',p,'Q',1,'Water'):
-            return CP.PropsSI('Smolar','P',1.0,'T',T,'Water') - 8.314462618*np.log(p/1.0)
+            return CP.PropsSI('Smolar','P',1.0,'T',T,'Water') - self.R*np.log(p/1.0)
         return CP.PropsSI('Smolar','P',p,'T',T,k)
     def h_gas(self, p, T, lam):
         """
@@ -193,7 +209,6 @@ class gas_turbine(object):
         n = np.log(T_b/T_a)/np.log(p_b/p_a)
         p = np.geomspace(p_a, p_b, N)
         return p, T_a*(p/p_a)**n
-
     def make_figures(self, N=60):
         lam = self.excess_air
         ev  = lambda f, p, T: np.array([f(a, b) for a, b in zip(p, T)])
@@ -287,7 +302,6 @@ class gas_turbine(object):
         # State 3 -------------------------------------------------------------
         self.p_3 = self.p_2*self.k_cc
             # Fixed point iteration to find h3
-        self.lamda = 1 # First guess for lambda
         self.excess_air = 1 # First guess for excess air
         self.h_3 = self.h_gas(self.p_3, self.T_3, self.excess_air) # First guess for h3
         nb_iter = 0
