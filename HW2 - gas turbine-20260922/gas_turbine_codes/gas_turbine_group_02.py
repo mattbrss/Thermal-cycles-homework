@@ -22,6 +22,7 @@ from scipy.integrate import quad, simpson
 from scipy.optimize import fsolve
 import matplotlib.pyplot as plt
 import numpy as np
+
 #
 #===BRAYTON CYCLE - TO BE IMPLEMENTED==========================================
 #
