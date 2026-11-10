@@ -50,14 +50,10 @@ class heat_exchanger(object):
         self.T_hs_ex = T_hs_ex  # [K]  hot side fluid exit temperature
         self.T_cs_su = T_cs_su  # [K]  cold side fluid supply temperature
         self.T_cs_ex = T_cs_ex  # [K]  cold side fluid exit temperature
-        self.pinch_target = parameters[
-            "pinch_target"
-        ]  # [K]  target for pinch point temperature difference
+        self.pinch_target = parameters["pinch_target"]  # [K]  target for pinch point temperature difference
         self.fluid_hs = parameters["wf_hot_side"]  # hot side working fluid
         self.fluid_cs = parameters["wf_cold_side"]  # cold side working fluid
-        self.p_cs_guess = parameters[
-            "p_cs_guess"
-        ]  # cold side working fluid pressure guess
+        self.p_cs_guess = parameters["p_cs_guess"]  # cold side working fluid pressure guess
         self.display = display  # if True, make the plots
 
     def evaluate(self):

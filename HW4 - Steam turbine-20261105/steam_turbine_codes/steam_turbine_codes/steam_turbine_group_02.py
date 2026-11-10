@@ -82,6 +82,9 @@ class steam_turbine(object):
         s_ref = CP.PropsSI('S','T',self.T_ref,'P',self.p_ref,'Water')
         #build a state
         def State(p,T=None,x=None,h=None):
+            """
+            Compute the thermodynamic state of water given two independent properties.
+            """
             if x is not None:
                 h = CP.PropsSI('H','P',p,'Q',x,"Water")
             elif T is not None:
@@ -187,20 +190,11 @@ class steam_turbine(object):
         self.h_14  = self.h_11+(2/3)*(self.h_10-self.h_11)
         self.h_16  = self.h_11+(1/3)*(self.h_10-self.h_11)
 
-        def p_from_h(h_target):
-            """Pressure at which the real LP expansion line (eta_is_LP from state 10) reaches h_target."""
-            lo,hi = self.p_1,self.p_10
-            for _ in range(60):                       # bisection (h increases with p on the line)
-                mid   = np.sqrt(lo*hi)
-                h_mid = self.h_10-self.eta_is_LP*(self.h_10-CP.PropsSI('H','P',mid,'S',self.s_10,"Water"))
-                if h_mid < h_target:
-                    lo = mid
-                else:
-                    hi = mid
-            return np.sqrt(lo*hi)
+        h_14s = self.h_10-(self.h_10-self.h_14)/self.eta_is_LP
+        h_16s = self.h_10-(self.h_10-self.h_16)/self.eta_is_LP
 
-        self.p_14 = p_from_h(self.h_14)
-        self.p_16 = p_from_h(self.h_16)
+        self.p_14 = CP.PropsSI('P','H',h_14s,'S',self.s_10,"Water")
+        self.p_16 = CP.PropsSI('P','H',h_16s,'S',self.s_10,"Water")
 
         _,self.T_14,self.h_14,self.s_14,self.x_14,self.e_14 = State(self.p_14,h=self.h_14)
         _,self.T_16,self.h_16,self.s_16,self.x_16,self.e_16 = State(self.p_16,h=self.h_16)
@@ -237,63 +231,50 @@ class steam_turbine(object):
         self.h_18 = self.h_17
         _,self.T_18,_,self.s_18,self.x_18,self.e_18 = State(self.p_18,h=self.h_18)
 
-        # PARTICULAR STATES 3,6,7
-        
-        # heat exchanger R1 (STATE 3)
+        # SYSTEM OF 3 EQUATIONS WITH 3 UNKNOWNS
+        # we solve that by using np.linalg to obtain the values of Xi
 
         Tsat_16 = CP.PropsSI('T','P',self.p_16,'Q',0,"Water")
         hg_16 = CP.PropsSI('H','P',self.p_16,'Q',1,"Water")
-        h_start = min(self.h_16,hg_16)
-        h_d = CP.PropsSI('H','P',self.p_2,'T',Tsat_16-self.T_pinch_ex,"Water")
-        self.X_3 = (h_d-self.h_2)/(h_start-self.h_17)
-        self.p_3 = self.p_2
-        self.h_3 = self.h_2+self.X_3*(self.h_16-self.h_17)
-        _,self.T_3,_,self.s_3,self.x_3,self.e_3 = State(self.p_3,h=self.h_3)
-
-        # heat exchanger R2 (STATE 6 AND 7)
+        h_start_1 = min(self.h_16,hg_16)
+        h_d_1 = CP.PropsSI('H','P',self.p_2,'T',Tsat_16-self.T_pinch_ex,"Water")
 
         Tsat_9 = CP.PropsSI('T','P',self.p_9,'Q',0,"Water")
         hg_9 = CP.PropsSI('H','P',self.p_9,'Q',1,"Water")
         h_start_2 = min(self.h_9,hg_9)
         h_d_2 = CP.PropsSI('H','P',self.p_6,'T',Tsat_9-self.T_pinch_ex,"Water")
-        diff_h = h_d_2 - self.h_5
-        A = np.array([[h_start_2-self.h_12-diff_h, -diff_h],
-                        [self.h_13-self.h_4, self.h_15-self.h_4]])
-        b = np.array([diff_h, self.h_4 - self.h_3])
-        self.X_1,self.X_2 = np.linalg.solve(A,b)
-        m_tot = 1+self.X_1+self.X_2
+        diff_h = h_d_2-self.h_5
 
-        self.h_6 = self.h_5 + self.X_1*(self.h_9-self.h_12)/m_tot
+        A = np.array([[0,0,h_start_1-self.h_17], # pinch R1
+                      [h_start_2-self.h_12-diff_h,-diff_h,0], # pinch R2
+                      [self.h_13-self.h_4,self.h_15-self.h_4,self.h_16-self.h_17]]) # drum
+        b = np.array([h_d_1-self.h_2, diff_h, self.h_4-self.h_2])
+
+        self.X_1,self.X_2,self.X_3 = np.linalg.solve(A,b)
+        X_tot = 1+self.X_1+self.X_2 # all before LP turbine
+
+        # STATE 3
+        # by using the fact that p2 = p4 = p3, and by doing a balance
+
+        self.p_3 = self.p_2
+        self.h_3 = self.h_2+self.X_3*(self.h_16-self.h_17)
+        _,self.T_3,_,self.s_3,self.x_3,self.e_3 = State(self.p_3,h=self.h_3)
+
+        # STATE 6
+        # another balance
+
+        self.h_6 = self.h_5+self.X_1*(self.h_9-self.h_12)/X_tot
         _,self.T_6,_,self.s_6,self.x_6,self.e_6 = State(self.p_6,h=self.h_6)
+
+        # STATE 7
+        # we can use the fact that p8 = p7*kheat
+        # and we use the efficiency of the pump, such that eta_pump = (v Delta p)/(Delta h) where we can obtain h7
+
         self.p_7 = self.p_8/self.k_heat
         rho_6 = CP.PropsSI('D','P',self.p_6,'H',self.h_6,"Water")
         v_6 = 1/rho_6
-        self.h_7 = self.h_6+v_6*((self.p_7-self.p_6)/self.eta_pump)
+        self.h_7 = self.h_6+v_6*(self.p_7-self.p_6)/self.eta_pump
         _,self.T_7,_,self.s_7,self.x_7,self.e_7 = State(self.p_7,h=self.h_7)
-
-
-        print("Flows",self.X_1,self.X_2,self.X_3)
-        print("State1",self.p_1,self.T_1,self.h_1,self.s_1,self.x_1,self.e_1)
-        print("State2",self.p_2,self.T_2,self.h_2,self.s_2,self.x_2,self.e_2)
-        print("State3",self.p_3,self.T_3,self.h_3,self.s_3,self.x_3,self.e_3)
-        print("State4",self.p_4,self.T_4,self.h_4,self.s_4,self.x_4,self.e_4)
-        print("State5",self.p_5,self.T_5,self.h_5,self.s_5,self.x_5,self.e_5)
-        print("State6",self.p_6,self.T_6,self.h_6,self.s_6,self.x_6,self.e_6)
-        print("State7",self.p_7,self.T_7,self.h_7,self.s_7,self.x_7,self.e_7)
-        print("State8",self.p_8,self.T_8,self.h_8,self.s_8,self.x_8,self.e_8)
-        print("State9",self.p_9,self.T_9,self.h_9,self.s_9,self.x_9,self.e_9)
-        print("State10",self.p_10,self.T_10,self.h_10,self.s_10,self.x_10,self.e_10)
-        print("State11",self.p_11,self.T_11,self.h_11,self.s_11,self.x_11,self.e_11)
-        print("State12",self.p_12,self.T_12,self.h_12,self.s_12,self.x_12,self.e_12)
-        print("State13",self.p_13,self.T_13,self.h_13,self.s_13,self.x_13,self.e_13)
-        print("State14",self.p_14,self.T_14,self.h_14,self.s_14,self.x_14,self.e_14)
-        print("State15",self.p_15,self.T_15,self.h_15,self.s_15,self.x_15,self.e_15)
-        print("State16",self.p_16,self.T_16,self.h_16,self.s_16,self.x_16,self.e_16)
-        print("State17",self.p_17,self.T_17,self.h_17,self.s_17,self.x_17,self.e_17)
-        print("State18",self.p_18,self.T_18,self.h_18,self.s_18,self.x_18,self.e_18)
-        
-
-
 
         ### OUTPUTS ###########################################################
 
@@ -306,35 +287,64 @@ class steam_turbine(object):
         self.e  = (self.e_1,  self.e_2,  self.e_3,  self.e_4,self.e_5,  self.e_6,  self.e_7,  self.e_8,self.e_9,  self.e_10, self.e_11, self.e_12,self.e_13,self.e_14,self.e_15,self.e_16,self.e_17,self.e_18)   # [J/kg]
         self.DAT = self.p, self.T, self.h, self.s, self.x, self.e
         
+        # Work ---------------------------------------------------------------
+        self.w_HP    = self.h_8-self.h_9 # [J/kg_vapor_in_turbine] work of the HP turbine
+        self.w_LP1    = self.h_10-self.h_14 # [J/kg_vapor_in_turbine_first_part] work of the LP turbine first part
+        self.w_LP2    = self.h_14-self.h_16 # [J/kg_vapor_in_turbine_second_part] work of the LP turbine second part
+        self.w_LP3   = self.h_16-self.h_11 # [J/kg_vapor_in_turbine_third_part] work of the LP turbine third part
+        self.w_LP    = (1+self.X_2)*self.w_LP1+(1)*self.w_LP2+(1-self.X_3)*self.w_LP3 # [J/kg_at_condenser] work of the LP turbine
+        self.w_pump1 = self.h_2-self.h_1 # [J/kg_liquid_in_pump] work of the first pump
+        self.w_pump2 = self.h_5-self.h_4 # [J/kg_liquid_in_pump] work of the second pump
+        self.w_pump3 = self.h_7-self.h_6 # [J/kg_liquid_in_pump] work of the third pump
+        self.WORK = self.w_HP, self.w_LP, self.w_pump1, self.w_pump2, self.w_pump3
 
-        # # Mass flow rates ------------------------------------------------------
-        # self.MASSFLOW  = self.m_dot_tot, self.m_dot_cond
-        # #   m_dot_tot   [kg/s]  total mass flow (through boiler)
-        # #   m_dot_cond  [kg/s]  mass flow at the inlet of the condenser
+        # Mass flow rates ------------------------------------------------------
+        self.m_dot_cond = self.P_e/(self.eta_mec*((1+self.X_1+self.X_2)*(self.w_HP-self.w_pump2-self.w_pump3)+self.w_LP-self.w_pump1)) # [kg/s] mass flow at the inlet of the condenser
+        self.m_dot_tot =  (1+self.X_1+self.X_2)*self.m_dot_cond # [kg/s] total mass flow (through boiler)
+        self.MASSFLOW  = self.m_dot_tot, self.m_dot_cond
 
-        # # Extraction fractions -------------------------------------------------
-        # self.XMASSFLOW = self.X_1, self.X_2, self.X_3
-        # #   X_1  [-]  fraction of condenser mass flow extracted at HP turbine exit to R2 
-        # #   X_2  [-]  fraction of condenser massflow extracted at LP turbine to the drum 
-        # #   X_3  [-]  fraction of condenser massflow extracted inside LP turbine to R1
+        # Extraction fractions -------------------------------------------------
+        self.XMASSFLOW = self.X_1, self.X_2, self.X_3
+        #   X_1  [-]  fraction of condenser mass flow extracted at HP turbine exit to R2 
+        #   X_2  [-]  fraction of condenser massflow extracted at LP turbine to the drum 
+        #   X_3  [-]  fraction of condenser massflow extracted inside LP turbine to R1
 
-        # # Efficiencies ---------------------------------------------------------
-        # self.ETA = self.eta_cyclen, self.eta_cyclex, self.eta_rotex
-        # #   eta_cyclen  [-]  cycle energy efficiency
-        # #   eta_cyclex  [-]  cycle exergy efficiency
-        # #   eta_rotex   [-]  turbines and pumps exergy efficiency
+        # Power ---------------------------------------------------------------
+        self.P_e = self.P_e # [W] electrical power output
+        self.P_HP = self.w_HP*self.m_dot_tot # [W] power output of the HP turbine
+        self.P_LP = self.w_LP*self.m_dot_cond # [W] power output of the LP turbine
+        self.P_pump1 = self.w_pump1*self.m_dot_cond # [W] power output of the first pump
+        self.P_pump2 = self.w_pump2*self.m_dot_tot # [W] power output of the second pump
+        self.P_pump3 = self.w_pump3*self.m_dot_tot # [W] power output of the third pump
+        self.P_m = self.P_e/self.eta_mec # [W] mechanical power output
+        self.POWER = self.P_e, self.P_m, self.P_HP, self.P_LP, self.P_pump1, self.P_pump2, self.P_pump3
 
-        # # Energy losses --------------------------------------------------------
-        # self.DATEN = self.loss_mec, self.loss_conden
-        # #   loss_mec    [W]  mechanical losses
-        # #   loss_conden [W]  heat rejected to the cold source
+        # Efficiencies ---------------------------------------------------------
+        self.Q_I = (self.h_8-self.h_7)*self.m_dot_tot + (self.h_10-self.h_9)*self.m_dot_cond*(1+self.X_2) # [W] heat input to the cycle
+        self.eta_cyclen = self.P_e/(self.eta_mec*self.Q_I) # [-] cycle energy efficiency
 
-        # # Exergy losses --------------------------------------------------------
-        # self.DATEX = self.loss_mec, self.loss_rotex, self.loss_condex, self.loss_valvex
-        # #   loss_mec    [W]  mechanical losses
-        # #   loss_rotex  [W]  exergy destroyed in turbines and pumps
-        # #   loss_condex [W]  exergy rejected/destroyed in condenser
-        # #   loss_valvex [W]  exergy destroyed in valves
+        self.E_I = (self.e_8-self.e_7)*self.m_dot_tot + (self.e_10-self.e_9)*self.m_dot_cond*(1+self.X_2) # [W] exergy input to the cycle
+        self.eta_cyclex = self.P_m/self.E_I # [-] cycle exergy efficiency
+
+        self.E_pump = (self.e_2-self.e_1)*self.m_dot_cond + (self.e_5-self.e_4)*self.m_dot_tot + (self.e_7-self.e_6)*self.m_dot_tot # [W] exergy generated in pumps
+        self.E_turb = (self.e_8-self.e_9)*self.m_dot_tot + (self.e_10-self.e_14)*self.m_dot_cond*(1+self.X_2) + (self.e_14-self.e_16)*self.m_dot_cond*(1) + (self.e_16-self.e_11)*self.m_dot_cond # [W] exergy generated in turbines
+        self.E_rot = self.E_turb-self.E_pump # [W] exergy recovered in turbines - exergy generated in pumps (>0)
+        self.eta_rotex = self.P_m/self.E_rot # [-] turbines and pumps exergy efficiency
+
+        self.ETA = self.eta_cyclen, self.eta_cyclex, self.eta_rotex
+
+        # Energy losses --------------------------------------------------------
+        self.loss_mec = self.P_m-self.P_e # [W] mechanical losses
+        self.Q_II = self.h_11*(1-self.X_3)*self.m_dot_cond + self.h_18*self.m_dot_cond*self.X_3 - self.h_1*self.m_dot_cond # [W] heat rejected to the cold source
+        self.loss_conden = self.Q_II # [W] heat rejected to the cold source
+        self.DATEN = self.loss_mec, self.loss_conden
+        # Exergy losses --------------------------------------------------------
+        self.loss_mec = self.P_m-self.P_e # [W] mechanical losses
+        self.loss_rotex = self.E_rot-self.P_m # [W] exergy destroyed in turbines and pumps
+        self.E_II = self.e_11*(1-self.X_3)*self.m_dot_cond + self.e_18*self.m_dot_cond*self.X_3 - self.e_1*self.m_dot_cond # [W] exergy rejected to the cold source
+        self.loss_condex = self.E_II # [W] exergy rejected to the cold source
+        self.loss_valvex = self.m_dot_cond*((self.e_12-self.e_13)*self.X_1 + (self.e_14-self.e_15)*self.X_2 + (self.e_17-self.e_18)*self.X_3) # [W] exergy destroyed in valves
+        self.DATEX = self.loss_mec, self.loss_rotex, self.loss_condex, self.loss_valvex
 
         # ── Figures -----------------------------------------------------------
         if self.display:
@@ -389,7 +399,7 @@ class steam_turbine(object):
                 ax.set_xlabel('s [kJ/kg/K]')
                 ax.grid(True)
 
-            # --- T-s diagram
+            # (1) T-s diagram
             self.fig_Ts,ax = plt.subplots(figsize=(8,6))
             ax.plot(s_liq,Td-273.15,'b',lw=0.8)
             ax.plot(s_vap,Td-273.15,'b',lw=0.8)
@@ -397,7 +407,7 @@ class steam_turbine(object):
             ax.set_ylabel('T [°C]')
             ax.set_title('T-s diagram')
 
-            # --- h-s diagram
+            # (2) h-s diagram
             self.fig_hs,ax = plt.subplots(figsize=(8,6))
             ax.plot(s_liq,h_liq,'b',lw=0.8)
             ax.plot(s_vap,h_vap,'b',lw=0.8)
@@ -405,6 +415,27 @@ class steam_turbine(object):
             ax.set_ylabel('h [kJ/kg]')
             ax.set_title('h-s diagram')
 
-            plt.show()
+            # (3) energy pie
+            names_en = ['Electrical output','Mechanical losses','Condenser heat']
+            vals_en  = [self.P_e,self.loss_mec,self.loss_conden]
+            self.fig_pie_en,ax = plt.subplots(figsize=(7,7))
+            ax.pie(vals_en,
+                   labels=[f"{n}\n{v/1e6:.1f} MW" for n,v in zip(names_en,vals_en)],
+                   autopct='%1.1f%%',startangle=90)
+            ax.set_title('Energy balance : total input = {:.1f} MW'.format(self.Q_I/1e6))
 
-            # self.FIG = self.fig_pie_en, self.fig_pie_ex, self.fig_Ts, self.fig_hs
+            # (4) exergy pie
+            names_ex = ['Electrical output','Mechanical losses','Condenser',
+                        'Valves','Turbines & pumps','Other (R1, R2, drum)']
+            vals_ex  = [self.P_e,self.loss_mec,self.loss_condex,
+                        self.loss_valvex,self.loss_rotex]
+            self.fig_pie_ex,ax = plt.subplots(figsize=(7,7))
+            ax.pie(vals_ex,
+                   labels=[f"{n}\n{v/1e6:.1f} MW" for n,v in zip(names_ex,vals_ex)],
+                   autopct='%1.1f%%',startangle=90)
+            ax.set_title('Exergy balance : total input = {:.1f} MW'.format(self.E_I/1e6))
+
+            if self.display:
+                self.FIG = self.fig_pie_en, self.fig_pie_ex, self.fig_Ts, self.fig_hs
+            else:
+                self.FIG = None, None, None, None

@@ -373,7 +373,7 @@ class gas_turbine(object):
         self.loss_echen  = self.dotm_g*self.h_4 - self.dotm_a*self.h_1 # [W] energy losses in the exhaust gases
         self.DATEN       = self.loss_mec,self.loss_echen
         # Exergy losses -------------------------------------------------------
-        exergy_rotor     = self.dotm_g*(self.e_3-self.e_4) - self.dotm_a*(self.e_2-self.e_1) # [W] total exergy losses in the rotor
+        exergy_rotor     = self.dotm_g*(self.e_3-self.e_4) - self.dotm_a*(self.e_2-self.e_1) # [W] total exergy balance in the rotors 
         self.loss_rotex  = exergy_rotor - P_mcy # [W] real exergy losses in the rotor (total losses - work produced)
         self.loss_combex = self.dotm_a*self.e_2 + self.dotm_f*self.e_f - self.dotm_g*self.e_3 # [W] exergy losses in the combustion chamber
         self.loss_echex  = self.dotm_g*self.e_4 - self.dotm_a*self.e_1 # [W] exergy losses in the exhaust gases
