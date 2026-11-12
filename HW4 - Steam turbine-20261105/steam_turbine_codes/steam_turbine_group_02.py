@@ -234,8 +234,8 @@ class steam_turbine(object):
         # SYSTEM OF 3 EQUATIONS WITH 3 UNKNOWNS
         # we solve that by using np.linalg to obtain the values of Xi
 
-        Tsat_16 = CP.PropsSI('T','P',self.p_16,'Q',0,"Water")
-        hg_16 = CP.PropsSI('H','P',self.p_16,'Q',1,"Water")
+        Tsat_16 = CP.PropsSI('T','P',self.p_16,'Q',0,"Water") # saturation temperature at p16
+        hg_16 = CP.PropsSI('H','P',self.p_16,'Q',1,"Water") # enthalpy of saturated vapor at p16
         h_start_1 = min(self.h_16,hg_16)
         h_d_1 = CP.PropsSI('H','P',self.p_2,'T',Tsat_16-self.T_pinch_ex,"Water")
 
@@ -327,7 +327,7 @@ class steam_turbine(object):
         self.eta_cyclex = self.P_m/self.E_I # [-] cycle exergy efficiency
 
         self.E_pump = (self.e_2-self.e_1)*self.m_dot_cond + (self.e_5-self.e_4)*self.m_dot_tot + (self.e_7-self.e_6)*self.m_dot_tot # [W] exergy generated in pumps
-        self.E_turb = (self.e_8-self.e_9)*self.m_dot_tot + (self.e_10-self.e_14)*self.m_dot_cond*(1+self.X_2) + (self.e_14-self.e_16)*self.m_dot_cond*(1) + (self.e_16-self.e_11)*self.m_dot_cond # [W] exergy generated in turbines
+        self.E_turb = (self.e_8-self.e_9)*self.m_dot_tot + (self.e_10-self.e_14)*self.m_dot_cond*(1+self.X_2) + (self.e_14-self.e_16)*self.m_dot_cond*(1) + (self.e_16-self.e_11)*self.m_dot_cond*(1-self.X_3) # [W] exergy generated in turbines
         self.E_rot = self.E_turb-self.E_pump # [W] exergy recovered in turbines - exergy generated in pumps (>0)
         self.eta_rotex = self.P_m/self.E_rot # [-] turbines and pumps exergy efficiency
 
@@ -344,8 +344,13 @@ class steam_turbine(object):
         self.E_II = self.e_11*(1-self.X_3)*self.m_dot_cond + self.e_18*self.m_dot_cond*self.X_3 - self.e_1*self.m_dot_cond # [W] exergy rejected to the cold source
         self.loss_condex = self.E_II # [W] exergy rejected to the cold source
         self.loss_valvex = self.m_dot_cond*((self.e_12-self.e_13)*self.X_1 + (self.e_14-self.e_15)*self.X_2 + (self.e_17-self.e_18)*self.X_3) # [W] exergy destroyed in valves
+        self.loss_R1 = self.m_dot_cond*(self.X_3*(self.e_16-self.e_17) - (self.e_3-self.e_2))
+        self.loss_R2 = self.m_dot_cond*(self.X_1*(self.e_9-self.e_12) - (1+self.X_1+self.X_2)*(self.e_6-self.e_5))
+        self.loss_drum = self.m_dot_cond*(self.e_3 + self.X_1*self.e_13 + self.X_2*self.e_15 - (1+self.X_1+self.X_2)*self.e_4)
+        self.loss_transex = self.loss_R1 + self.loss_R2 + self.loss_drum 
         self.DATEX = self.loss_mec, self.loss_rotex, self.loss_condex, self.loss_valvex
 
+        self.closure = self.E_I - (self.P_e + self.loss_mec + self.loss_condex + self.loss_valvex + self.loss_rotex + self.loss_transex) # [W] closure of the exergy balance
         # ── Figures -----------------------------------------------------------
         if self.display:
 
@@ -426,9 +431,9 @@ class steam_turbine(object):
 
             # (4) exergy pie
             names_ex = ['Electrical output','Mechanical losses','Condenser',
-                        'Valves','Turbines & pumps','Other (R1, R2, drum)']
+                        'Valves','Turbines & pumps', 'Exchangers losses']
             vals_ex  = [self.P_e,self.loss_mec,self.loss_condex,
-                        self.loss_valvex,self.loss_rotex]
+                        self.loss_valvex,self.loss_rotex,self.loss_transex]
             self.fig_pie_ex,ax = plt.subplots(figsize=(7,7))
             ax.pie(vals_ex,
                    labels=[f"{n}\n{v/1e6:.1f} MW" for n,v in zip(names_ex,vals_ex)],

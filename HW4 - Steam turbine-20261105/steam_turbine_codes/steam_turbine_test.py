@@ -59,14 +59,25 @@ params = {'p_6':          p_6,
 print_states = True
 my_ST = steam_turbine(inputs, params, True)
 my_ST.evaluate()
-for state in range(len(my_ST.DAT[0])):
-    print(f"State {state+1}:")
-    print(f"  Pressure: {my_ST.DAT[0][state]:.2f} Pa")
-    print(f"  Temperature: {my_ST.DAT[1][state]:.2f} K")
-    print(f"  Enthalpy: {my_ST.DAT[2][state]:.2f} J/kg")
-    print(f"  Entropy: {my_ST.DAT[3][state]:.2f} J/(kg·K)")
-    print(f"  Quality: {my_ST.DAT[4][state]:.2f}")
-    print(f"  Exergy: {my_ST.DAT[5][state]:.2f} J/kg")
+print(f"Flows rate : m_dot_tot = {my_ST.m_dot_tot:.3f} kg/s | m_dot_cond = {my_ST.m_dot_cond:.3f} kg/s")
+print(f"Efficiencies : eta_cyclen = {my_ST.eta_cyclen:.3f} | eta_cyclex = {my_ST.eta_cyclex:.3f} | eta_rotex = {my_ST.eta_rotex:.3f}")
+print(f"Losses : loss_mec = {my_ST.loss_mec/1e3:.3f} kW | loss_conden = {my_ST.loss_conden/1e3:.3f} kW | loss_rotex = {my_ST.loss_rotex/1e3:.3f} kW | loss_condex = {my_ST.loss_condex/1e3:.3f} kW | loss_valvex = {my_ST.loss_valvex/1e3:.3f} kW | loss_rest = {my_ST.loss_transex/1e3:.3f} kW")
+print(f"Flows : X1 = {my_ST.X_1:.3f} | X2 = {my_ST.X_2:.3f} | X3 = {my_ST.X_3:.3f}\n")
+print(f"{'State':>5} {'p [bar]':>12} {'T [K]':>12} {'h [kJ/kg]':>12} {'s [kJ/kgK]':>12} {'x [-]':>10} {'e [kJ/kg]':>12}")
+print("-" * 81)
+for i in range(18):
+    p = my_ST.p[i]
+    T = my_ST.T[i]
+    h = my_ST.h[i]
+    s = my_ST.s[i]
+    x = my_ST.x[i]
+    e = my_ST.e[i]
+
+    print(f"{i+1:>5} {p/1e5:>12.4f} {T:>12.2f} "
+          f"{h/1e3:>12.2f} {s/1e3:>12.4f} "
+          f"{x:>10.3f} {e/1e3:>12.2f}")
+print(" Closure :", my_ST.closure)
+
 # Show charts
 plt.show()
 
