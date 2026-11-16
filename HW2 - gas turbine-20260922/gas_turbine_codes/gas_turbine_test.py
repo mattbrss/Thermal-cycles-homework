@@ -70,4 +70,6 @@ print("Exhaust exergy losses",my_GT.loss_echex)
 print("Cycle work",my_GT.WORK)
 
 print("Exergy power",my_GT.dotm_a*my_GT.e_1,my_GT.dotm_a*my_GT.e_2,my_GT.dotm_g*my_GT.e_3,my_GT.dotm_g*my_GT.e_4)
+# print comparaison exergy fuel vs LHV fuel
+print("Exergy power fuel",my_GT.dotm_f*my_GT.e_f,my_GT.dotm_f*my_GT.LHV)
 plt.show()
