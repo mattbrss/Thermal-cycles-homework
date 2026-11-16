@@ -2,7 +2,16 @@
 LELME2150 - Thermal Cycles
 Homework 4 - Steam Turbine      
 
-Signature of the function for the steam turbine
+Group 02
+
+AI-assistance
+------------------------
+This code was written by the group. The following AI tools were used as support:
+  - Claude (Anthropic), in a chat conversation: to discuss the equations,
+    to draft some parts of the code and to help debug.
+  - GitHub Copilot (VS Code): inline auto-completion suggestions while typing, docstring generation.
+All AI-generated suggestions were reviewed, adapted and tested by the group. The results
+were checked against book results (p. 125) of the assignment and the exergy pie chart of the course.
 
 """
 
@@ -78,6 +87,7 @@ class steam_turbine(object):
 
         # initial values: p6,p8,p9
         # REFERENCE STATE
+        CP.set_reference_state('Water', self.T_ref, CP.PropsSI('Dmolar','T',self.T_ref,'P',self.p_ref,'Water'), 0, 0)        
         h_ref = CP.PropsSI('H','T',self.T_ref,'P',self.p_ref,'Water')
         s_ref = CP.PropsSI('S','T',self.T_ref,'P',self.p_ref,'Water')
         #build a state

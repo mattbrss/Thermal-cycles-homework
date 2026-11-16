@@ -77,6 +77,7 @@ for i in range(18):
           f"{h/1e3:>12.2f} {s/1e3:>12.4f} "
           f"{x:>10.3f} {e/1e3:>12.2f}")
 print(" Closure :", my_ST.closure)
+print(" Perte drum :", my_ST.loss_drum/1e3, "kW")
 
 # Show charts
 plt.show()
